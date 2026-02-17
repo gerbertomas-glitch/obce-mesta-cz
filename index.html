@@ -39,6 +39,10 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        /* Styl pro našeptávač */
+        #suggestions {
+            z-index: 1000;
+        }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen font-sans">
@@ -51,19 +55,31 @@
             <h1 class="text-3xl font-bold text-blue-700 mb-2">
                 <i class="fa-solid fa-map-location-dot mr-2"></i>Města v okruhu
             </h1>
-            <p class="text-slate-500">Zadejte název obce a vzdálenost pro nalezení sousedů.</p>
+            <p class="text-slate-500">Začněte psát název obce a vyberte tu správnou ze seznamu.</p>
         </header>
 
         <!-- Ovládací panel -->
         <div class="bg-white p-6 rounded-xl shadow-md mb-6">
             <div class="flex flex-col md:flex-row gap-4 items-end">
                 
-                <!-- Vstup: Město -->
-                <div class="flex-1 w-full">
+                <!-- Vstup: Město s našeptávačem -->
+                <div class="flex-1 w-full relative">
                     <label for="cityInput" class="block text-sm font-medium text-slate-700 mb-1">Město / Obec</label>
-                    <input type="text" id="cityInput" placeholder="Např. Praha, Brno, Loučeň..." 
-                           class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                           onkeydown="if(event.key === 'Enter') searchNearby()">
+                    <div class="relative">
+                        <input type="text" id="cityInput" placeholder="Začněte psát (např. Nová Ves)..." autocomplete="off"
+                               class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                               oninput="handleInput(this.value)"
+                               onkeydown="if(event.key === 'Enter') { closeSuggestions(); searchNearby(); }">
+                        <!-- Spinner uvnitř inputu pro našeptávač -->
+                        <div id="inputSpinner" class="absolute right-3 top-3 hidden">
+                             <i class="fa-solid fa-circle-notch fa-spin text-slate-400"></i>
+                        </div>
+                    </div>
+                    
+                    <!-- Kontejner pro našeptávač (Dropdown) -->
+                    <div id="suggestions" class="absolute left-0 top-full mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl hidden max-h-60 overflow-y-auto">
+                        <!-- Zde se dynamicky vloží výsledky -->
+                    </div>
                 </div>
 
                 <!-- Vstup: Rádius -->
@@ -74,7 +90,7 @@
                 </div>
 
                 <!-- Tlačítko hledat -->
-                <button onclick="searchNearby()" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 shadow-sm">
+                <button onclick="closeSuggestions(); searchNearby()" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 shadow-sm">
                     <span>Hledat</span>
                     <div id="loadingSpinner" class="loader"></div>
                 </button>
@@ -140,8 +156,102 @@
             shadowSize: [41, 41]
         });
 
-        // --- 2. Hlavní Funkce Hledání ---
-        async function searchNearby() {
+        // --- 2. Našeptávač (Autocomplete) Logic ---
+        let debounceTimer;
+        
+        // Funkce volaná při psaní (čeká 400ms než pošle dotaz)
+        function handleInput(value) {
+            clearTimeout(debounceTimer);
+            const suggestionsBox = document.getElementById('suggestions');
+            const inputSpinner = document.getElementById('inputSpinner');
+            
+            if (value.length < 3) {
+                suggestionsBox.classList.add('hidden');
+                inputSpinner.classList.add('hidden');
+                return;
+            }
+
+            inputSpinner.classList.remove('hidden');
+
+            debounceTimer = setTimeout(() => {
+                fetchSuggestions(value);
+            }, 400);
+        }
+
+        async function fetchSuggestions(query) {
+            const suggestionsBox = document.getElementById('suggestions');
+            const inputSpinner = document.getElementById('inputSpinner');
+
+            try {
+                // Hledáme v Nominatim API, omezujeme na ČR (countrycodes=cz) pro přesnější výsledky
+                // Pokud chcete hledat i v zahraničí, odstraňte "&countrycodes=cz"
+                const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&countrycodes=cz`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+
+                suggestionsBox.innerHTML = '';
+                
+                if (data.length > 0) {
+                    suggestionsBox.classList.remove('hidden');
+                    
+                    data.forEach(item => {
+                        const div = document.createElement('div');
+                        div.className = "p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0 transition text-sm";
+                        
+                        // Zformátujeme název (aby byl hezky čitelný)
+                        // display_name bývá dlouhý, zkusíme vzít název a okres/kraj
+                        const displayName = item.display_name;
+                        const name = item.name;
+                        
+                        div.innerHTML = `
+                            <div class="font-bold text-slate-800">${name}</div>
+                            <div class="text-xs text-slate-500 truncate">${displayName}</div>
+                        `;
+                        
+                        // Po kliknutí vybereme město a rovnou hledáme
+                        div.onclick = () => selectCity(item);
+                        
+                        suggestionsBox.appendChild(div);
+                    });
+                } else {
+                    suggestionsBox.classList.add('hidden');
+                }
+            } catch (error) {
+                console.error("Chyba při stahování návrhů:", error);
+            } finally {
+                inputSpinner.classList.add('hidden');
+            }
+        }
+
+        function selectCity(item) {
+            const input = document.getElementById('cityInput');
+            // Nastavíme do inputu jen krátký název (např. "Loučeň")
+            input.value = item.name;
+            closeSuggestions();
+            
+            // Rovnou spustíme hledání s přesnými souřadnicemi z našeptávače
+            // Tím se vyhneme duplicitnímu hledání a nejistotě
+            searchNearby(item.lat, item.lon, item.name);
+        }
+
+        function closeSuggestions() {
+            document.getElementById('suggestions').classList.add('hidden');
+        }
+
+        // Zavření našeptávače při kliknutí mimo
+        document.addEventListener('click', function(e) {
+            const container = document.querySelector('.relative');
+            const suggestions = document.getElementById('suggestions');
+            if (!container.contains(e.target) && !suggestions.classList.contains('hidden')) {
+                closeSuggestions();
+            }
+        });
+
+
+        // --- 3. Hlavní Funkce Hledání ---
+        // Nyní přijímá volitelné argumenty lat/lon/name, pokud jdeme z našeptávače
+        async function searchNearby(customLat = null, customLon = null, customName = null) {
             const city = document.getElementById('cityInput').value;
             const radiusKm = parseFloat(document.getElementById('radiusInput').value);
             const statusMsg = document.getElementById('statusMessage');
@@ -169,27 +279,27 @@
             spinner.style.display = 'block';
 
             try {
-                // Krok A: Geocoding (Nominatim API)
-                const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}&limit=1&addressdetails=1&accept-language=cs`;
-                
-                const geoResponse = await fetch(geocodeUrl, {
-                    headers: { 'Accept': 'application/json' }
-                });
-                
-                if (!geoResponse.ok) throw new Error(`Chyba geolokace: ${geoResponse.status}`);
-                
-                const geoData = await geoResponse.json();
+                let centerLat, centerLon, centerName;
 
-                if (geoData.length === 0) {
-                    throw new Error("Město nebylo nalezeno. Zkuste upřesnit název.");
+                // LOGIKA: Pokud máme souřadnice z našeptávače, použijeme je. Jinak hledáme textově.
+                if (customLat && customLon) {
+                    centerLat = parseFloat(customLat);
+                    centerLon = parseFloat(customLon);
+                    centerName = customName || city;
+                } else {
+                    // Krok A: Geocoding (Nominatim API) - fallback pokud uživatel nepoužil našeptávač a dal Enter
+                    const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}&limit=1&addressdetails=1&accept-language=cs`;
+                    
+                    const geoResponse = await fetch(geocodeUrl, { headers: { 'Accept': 'application/json' } });
+                    if (!geoResponse.ok) throw new Error(`Chyba geolokace: ${geoResponse.status}`);
+                    const geoData = await geoResponse.json();
+
+                    if (geoData.length === 0) throw new Error("Město nebylo nalezeno. Zkuste použít našeptávač.");
+
+                    centerLat = parseFloat(geoData[0].lat);
+                    centerLon = parseFloat(geoData[0].lon);
+                    centerName = geoData[0].name || geoData[0].display_name.split(',')[0];
                 }
-
-                const centerLat = parseFloat(geoData[0].lat);
-                const centerLon = parseFloat(geoData[0].lon);
-                
-                // Zkusíme najít hezké jméno (město nebo obec)
-                let centerName = geoData[0].name; 
-                if (!centerName) centerName = geoData[0].display_name.split(',')[0];
 
                 // Krok B: Mapa
                 map.setView([centerLat, centerLon], 11);
@@ -209,9 +319,8 @@
 
                 // Krok C: Hledání okolí (Overpass API)
                 const radiusMeters = radiusKm * 1000;
-                // Nastavíme timeout přímo v dotazu na 10s pro rychlejší selhání
                 const overpassQuery = `
-                    [out:json][timeout:10];
+                    [out:json][timeout:15];
                     (
                       node["place"="city"](around:${radiusMeters},${centerLat},${centerLon});
                       node["place"="town"](around:${radiusMeters},${centerLat},${centerLon});
@@ -220,7 +329,7 @@
                     out body;
                 `;
 
-                // Seznam serverů k vyzkoušení
+                // Seznam serverů k vyzkoušení (Load balancing)
                 const servers = [
                     "https://overpass-api.de/api/interpreter",
                     "https://overpass.kumi.systems/api/interpreter", 
@@ -228,26 +337,22 @@
                 ];
 
                 let placesData = null;
-                let successServer = "";
-
-                // Smyčka přes servery - zkouší jeden po druhém
+                
                 for (let i = 0; i < servers.length; i++) {
                     const server = servers[i];
                     try {
                         if (i > 0) showInfo(`Server ${i} neodpovídá, zkouším záložní server...`);
                         placesData = await fetchOverpass(server, overpassQuery);
-                        successServer = server;
-                        break; // Úspěch, vyskočíme ze smyčky
+                        break;
                     } catch (e) {
                         console.warn(`Server ${server} selhal:`, e);
-                        // Pokud je to poslední server a stále chyba, vyhodíme ji ven
                         if (i === servers.length - 1) {
                             throw new Error("Všechny mapové servery jsou momentálně přetížené. Zkuste to prosím za minutu.");
                         }
                     }
                 }
                 
-                infoMsg.classList.add('hidden'); // Skrýt info zprávy po úspěchu
+                infoMsg.classList.add('hidden');
 
                 // Krok D: Zpracování
                 let places = [];
@@ -311,23 +416,18 @@
             }
         }
 
-        // Pomocná funkce pro volání Overpass API s timeoutem
         async function fetchOverpass(baseUrl, query) {
-            // Nastavíme abort controller pro timeout fetch požadavku (10s)
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
             try {
                 const response = await fetch(`${baseUrl}?data=${encodeURIComponent(query)}`, {
                     signal: controller.signal
                 });
-                clearTimeout(timeoutId); // Zrušíme timeout, pokud odpověď přišla
+                clearTimeout(timeoutId);
                 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 
-                // Ověření, zda je odpověď platný JSON (server někdy vrací HTML chybovou stránku)
                 const text = await response.text();
                 try {
                     return JSON.parse(text);
