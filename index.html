@@ -111,20 +111,16 @@
 
     <script>
         // --- 1. Inicializace Mapy ---
-        // Nastavíme výchozí pohled na ČR
         const map = L.map('map').setView([49.8175, 15.4730], 7);
 
-        // Přidání mapových podkladů (OpenStreetMap)
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap'
         }).addTo(map);
 
-        // Globální proměnné pro uložení markerů a kruhu, abychom je mohli mazat
         let markersGroup = L.layerGroup().addTo(map);
         let searchCircle = null;
 
-        // Vlastní ikony pro markery
         const centerIcon = L.icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
@@ -168,9 +164,15 @@
             spinner.style.display = 'block';
 
             try {
-                // Krok A: Získání souřadnic hledaného města (Nominatim API)
-                const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}&limit=1`;
-                const geoResponse = await fetch(geocodeUrl);
+                // Krok A: Geocoding (Nominatim API)
+                const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}&limit=1&addressdetails=1&accept-language=cs`;
+                
+                const geoResponse = await fetch(geocodeUrl, {
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                if (!geoResponse.ok) throw new Error(`Chyba geolokace: ${geoResponse.status}`);
+                
                 const geoData = await geoResponse.json();
 
                 if (geoData.length === 0) {
@@ -179,79 +181,88 @@
 
                 const centerLat = parseFloat(geoData[0].lat);
                 const centerLon = parseFloat(geoData[0].lon);
-                const centerName = geoData[0].display_name.split(',')[0]; // Získání krátkého názvu
+                
+                // Zkusíme najít hezké jméno (město nebo obec)
+                let centerName = geoData[0].name; 
+                if (!centerName) centerName = geoData[0].display_name.split(',')[0];
 
-                // Krok B: Nastavení mapy na střed
+                // Krok B: Mapa
                 map.setView([centerLat, centerLon], 11);
                 
-                // Přidání červeného markeru pro střed
                 L.marker([centerLat, centerLon], {icon: centerIcon})
                  .bindPopup(`<b>${centerName}</b><br>Střed hledání`)
                  .addTo(markersGroup);
 
-                // Vykreslení kruhu
                 searchCircle = L.circle([centerLat, centerLon], {
                     color: '#3b82f6',
                     fillColor: '#3b82f6',
                     fillOpacity: 0.1,
-                    radius: radiusKm * 1000 // Leaflet používá metry
+                    radius: radiusKm * 1000
                 }).addTo(map);
                 
-                // Zoom mapy tak, aby se vešel celý kruh
                 map.fitBounds(searchCircle.getBounds());
 
-                // Krok C: Hledání okolních obcí (Overpass API)
-                // Hledáme uzly (nodes) s tagem place = city, town nebo village v daném rádiusu
+                // Krok C: Hledání okolí (Overpass API)
+                // Optimalizovaný dotaz (oddělené node pro vyšší rychlost)
                 const radiusMeters = radiusKm * 1000;
                 const overpassQuery = `
                     [out:json][timeout:25];
                     (
-                      node["place"~"city|town|village"](around:${radiusMeters},${centerLat},${centerLon});
+                      node["place"="city"](around:${radiusMeters},${centerLat},${centerLon});
+                      node["place"="town"](around:${radiusMeters},${centerLat},${centerLon});
+                      node["place"="village"](around:${radiusMeters},${centerLat},${centerLon});
                     );
                     out body;
                 `;
 
-                const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
-                const placesResponse = await fetch(overpassUrl);
-                const placesData = await placesResponse.json();
+                // Zkusíme hlavní server, pokud selže, zkusíme záložní
+                let placesData = null;
+                const primaryServer = "https://overpass-api.de/api/interpreter";
+                const backupServer = "https://api.openstreetmap.fr/oapi/interpreter";
 
-                // Krok D: Zpracování výsledků
-                let places = [];
-                
-                placesData.elements.forEach(place => {
-                    // Vypočítat vzdálenost
-                    const placeLat = place.lat;
-                    const placeLon = place.lon;
-                    const dist = map.distance([centerLat, centerLon], [placeLat, placeLon]) / 1000; // v km
-
-                    // Ignorujeme samotný střed (vzdálenost téměř 0)
-                    if (dist > 0.1) {
-                        places.push({
-                            name: place.tags.name || "Neznámé místo",
-                            type: translateType(place.tags.place),
-                            lat: placeLat,
-                            lon: placeLon,
-                            distance: dist
-                        });
+                try {
+                    placesData = await fetchOverpass(primaryServer, overpassQuery);
+                } catch (e) {
+                    console.warn("Hlavní server selhal, zkouším záložní...", e);
+                    try {
+                        placesData = await fetchOverpass(backupServer, overpassQuery);
+                    } catch (e2) {
+                        throw new Error("Server mapových dat je přetížen. Zkuste to prosím za chvíli.");
                     }
-                });
+                }
 
-                // Seřadit podle vzdálenosti
+                // Krok D: Zpracování
+                let places = [];
+                if (placesData && placesData.elements) {
+                    placesData.elements.forEach(place => {
+                        const placeLat = place.lat;
+                        const placeLon = place.lon;
+                        const dist = map.distance([centerLat, centerLon], [placeLat, placeLon]) / 1000;
+
+                        if (dist > 0.1 && dist <= radiusKm) {
+                            places.push({
+                                name: place.tags.name || "Neznámé místo",
+                                type: translateType(place.tags.place),
+                                lat: placeLat,
+                                lon: placeLon,
+                                distance: dist
+                            });
+                        }
+                    });
+                }
+
                 places.sort((a, b) => a.distance - b.distance);
-
-                // Krok E: Vykreslení do seznamu a na mapu
                 countSpan.innerText = `(${places.length})`;
 
+                // Krok E: Vykreslení
                 if (places.length === 0) {
                      listContainer.innerHTML = '<div class="text-center text-slate-500 mt-4">V tomto okruhu nebyla nalezena žádná jiná města ani obce.</div>';
                 } else {
                     places.forEach((place, index) => {
-                        // Přidat do seznamu
                         const item = document.createElement('div');
                         item.className = "flex justify-between items-center p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 transition rounded-lg mx-1";
                         item.onclick = () => {
                             map.flyTo([place.lat, place.lon], 13);
-                            placeMarker.openPopup();
                         };
                         item.innerHTML = `
                             <div>
@@ -267,8 +278,7 @@
                         `;
                         listContainer.appendChild(item);
 
-                        // Přidat marker na mapu
-                        const placeMarker = L.marker([place.lat, place.lon], {icon: neighborIcon})
+                        L.marker([place.lat, place.lon], {icon: neighborIcon})
                             .bindPopup(`<b>${place.name}</b><br>${place.type}<br>Vzdálenost: ${place.distance.toFixed(1)} km`)
                             .addTo(markersGroup);
                     });
@@ -276,28 +286,33 @@
 
             } catch (error) {
                 console.error(error);
-                showError("Chyba při komunikaci se serverem. Zkuste to prosím znovu.");
+                showError(error.message);
             } finally {
                 spinner.style.display = 'none';
             }
         }
 
-        // Pomocná funkce pro překlad typů sídel
+        // Pomocná funkce pro volání Overpass API
+        async function fetchOverpass(baseUrl, query) {
+            const response = await fetch(`${baseUrl}?data=${encodeURIComponent(query)}`);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return await response.json();
+        }
+
         function translateType(type) {
             switch(type) {
                 case 'city': return 'Město';
                 case 'town': return 'Městečko';
                 case 'village': return 'Obec / Vesnice';
-                case 'hamlet': return 'Osada';
-                case 'suburb': return 'Předměstí';
                 default: return type;
             }
         }
 
-        // Pomocná funkce pro zobrazení chyby
         function showError(msg) {
             const el = document.getElementById('statusMessage');
-            el.innerText = msg;
+            el.innerText = `Chyba: ${msg}`;
             el.classList.remove('hidden');
         }
     </script>
