@@ -80,6 +80,7 @@
                 </button>
             </div>
             <p id="statusMessage" class="text-red-500 text-sm mt-2 hidden"></p>
+            <p id="infoMessage" class="text-blue-500 text-xs mt-2 hidden"></p>
         </div>
 
         <!-- Obsah: Mapa a Seznam -->
@@ -144,13 +145,17 @@
             const city = document.getElementById('cityInput').value;
             const radiusKm = parseFloat(document.getElementById('radiusInput').value);
             const statusMsg = document.getElementById('statusMessage');
+            const infoMsg = document.getElementById('infoMessage');
             const spinner = document.getElementById('loadingSpinner');
             const listContainer = document.getElementById('resultsList');
             const countSpan = document.getElementById('resultCount');
 
             // Reset UI
             statusMsg.classList.add('hidden');
+            infoMsg.classList.add('hidden');
             statusMsg.innerText = "";
+            infoMsg.innerText = "";
+            
             markersGroup.clearLayers();
             if (searchCircle) map.removeLayer(searchCircle);
             listContainer.innerHTML = '';
@@ -203,10 +208,10 @@
                 map.fitBounds(searchCircle.getBounds());
 
                 // Krok C: Hledání okolí (Overpass API)
-                // Optimalizovaný dotaz (oddělené node pro vyšší rychlost)
                 const radiusMeters = radiusKm * 1000;
+                // Nastavíme timeout přímo v dotazu na 10s pro rychlejší selhání
                 const overpassQuery = `
-                    [out:json][timeout:25];
+                    [out:json][timeout:10];
                     (
                       node["place"="city"](around:${radiusMeters},${centerLat},${centerLon});
                       node["place"="town"](around:${radiusMeters},${centerLat},${centerLon});
@@ -215,21 +220,34 @@
                     out body;
                 `;
 
-                // Zkusíme hlavní server, pokud selže, zkusíme záložní
-                let placesData = null;
-                const primaryServer = "https://overpass-api.de/api/interpreter";
-                const backupServer = "https://api.openstreetmap.fr/oapi/interpreter";
+                // Seznam serverů k vyzkoušení
+                const servers = [
+                    "https://overpass-api.de/api/interpreter",
+                    "https://overpass.kumi.systems/api/interpreter", 
+                    "https://api.openstreetmap.fr/oapi/interpreter"
+                ];
 
-                try {
-                    placesData = await fetchOverpass(primaryServer, overpassQuery);
-                } catch (e) {
-                    console.warn("Hlavní server selhal, zkouším záložní...", e);
+                let placesData = null;
+                let successServer = "";
+
+                // Smyčka přes servery - zkouší jeden po druhém
+                for (let i = 0; i < servers.length; i++) {
+                    const server = servers[i];
                     try {
-                        placesData = await fetchOverpass(backupServer, overpassQuery);
-                    } catch (e2) {
-                        throw new Error("Server mapových dat je přetížen. Zkuste to prosím za chvíli.");
+                        if (i > 0) showInfo(`Server ${i} neodpovídá, zkouším záložní server...`);
+                        placesData = await fetchOverpass(server, overpassQuery);
+                        successServer = server;
+                        break; // Úspěch, vyskočíme ze smyčky
+                    } catch (e) {
+                        console.warn(`Server ${server} selhal:`, e);
+                        // Pokud je to poslední server a stále chyba, vyhodíme ji ven
+                        if (i === servers.length - 1) {
+                            throw new Error("Všechny mapové servery jsou momentálně přetížené. Zkuste to prosím za minutu.");
+                        }
                     }
                 }
+                
+                infoMsg.classList.add('hidden'); // Skrýt info zprávy po úspěchu
 
                 // Krok D: Zpracování
                 let places = [];
@@ -287,18 +305,40 @@
             } catch (error) {
                 console.error(error);
                 showError(error.message);
+                infoMsg.classList.add('hidden');
             } finally {
                 spinner.style.display = 'none';
             }
         }
 
-        // Pomocná funkce pro volání Overpass API
+        // Pomocná funkce pro volání Overpass API s timeoutem
         async function fetchOverpass(baseUrl, query) {
-            const response = await fetch(`${baseUrl}?data=${encodeURIComponent(query)}`);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+            // Nastavíme abort controller pro timeout fetch požadavku (10s)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+            try {
+                const response = await fetch(`${baseUrl}?data=${encodeURIComponent(query)}`, {
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId); // Zrušíme timeout, pokud odpověď přišla
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                // Ověření, zda je odpověď platný JSON (server někdy vrací HTML chybovou stránku)
+                const text = await response.text();
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    throw new Error("Server vrátil neplatná data.");
+                }
+
+            } catch (err) {
+                clearTimeout(timeoutId);
+                throw err;
             }
-            return await response.json();
         }
 
         function translateType(type) {
@@ -313,6 +353,12 @@
         function showError(msg) {
             const el = document.getElementById('statusMessage');
             el.innerText = `Chyba: ${msg}`;
+            el.classList.remove('hidden');
+        }
+
+        function showInfo(msg) {
+            const el = document.getElementById('infoMessage');
+            el.innerText = msg;
             el.classList.remove('hidden');
         }
     </script>
