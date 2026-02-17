@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa Obcí ČR</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Leaflet CSS & JS (Mapa) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Základní styly pro mapu a layout */
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; font-family: sans-serif; }
+        .map-container { width: 100%; height: 100%; z-index: 0; background: #e2e8f0; }
+        
+        /* Animace načítání */
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loading-spinner { border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 3px solid #fff; width: 20px; height: 20px; animation: spin 1s linear infinite; }
+        .loading-spinner-blue { border: 3px solid #e2e8f0; border-radius: 50%; border-top: 3px solid #3b82f6; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+
+    <div id="root" class="h-full"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- KONFIGURACE ---
+        const API_GEOCODE = "https://photon.komoot.io/api/"; // Hledání souřadnic
+        const API_OVERPASS = "https://overpass-api.de/api/interpreter"; // Hledání obcí
+
+        // --- POMOCNÉ FUNKCE ---
+        const calculateDistance = (lat1, lon1, lat2, lon2) => {
+            const R = 6371; // Poloměr Země v km
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        };
+
+        // --- KOMPONENTA MAPY (Izolovaná pro stabilitu) ---
+        const MapView = ({ center, radius, places }) => {
+            const containerRef = useRef(null);
+            const mapInstance = useRef(null);
+            const layersRef = useRef({ markers: null, circle: null, center: null });
+
+            // 1. Inicializace mapy (pouze jednou)
+            useEffect(() => {
+                if (!containerRef.current) return;
+
+                // Vytvoříme div pro mapu
+                const mapDiv = document.createElement('div');
+                mapDiv.style.width = '100%';
+                mapDiv.style.height = '100%';
+                containerRef.current.appendChild(mapDiv);
+
+                const map = L.map(mapDiv).setView([49.8175, 15.4730], 7); // Střed ČR
+                
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(map);
+
+                // Inicializace vrstev
+                layersRef.current.circle = L.layerGroup().addTo(map);
+                layersRef.current.center = L.layerGroup().addTo(map);
+                layersRef.current.markers = L.layerGroup().addTo(map);
+
+                mapInstance.current = map;
+
+                // Cleanup funkce
+                return () => {
+                    map.remove();
+                    if (containerRef.current && containerRef.current.contains(mapDiv)) {
+                        containerRef.current.removeChild(mapDiv);
+                    }
+                };
+            }, []);
+
+            // 2. Aktualizace zobrazení (při změně dat)
+            useEffect(() => {
+                const map = mapInstance.current;
+                if (!map) return;
+
+                const { circle, center: centerLayer, markers } = layersRef.current;
+
+                // Vyčistit staré vrstvy
+                circle.clearLayers();
+                centerLayer.clearLayers();
+                markers.clearLayers();
+
+                // A) Vykreslit střed a kruh
+                if (center) {
+                    // Středový bod
+                    const centerIcon = L.divIcon({
+                        className: 'bg-red-600 border-2 border-white rounded-full shadow-lg',
+                        iconSize: [16, 16]
+                    });
+                    L.marker([center.lat, center.lon], { icon: centerIcon })
+                        .bindPopup(`<b>${center.name}</b><br>Střed hledání`)
+                        .addTo(centerLayer);
+
+                    // Kruh
+                    const radiusCircle = L.circle([center.lat, center.lon], {
+                        color: '#3b82f6',
+                        fillColor: '#3b82f6',
+                        fillOpacity: 0.1,
+                        radius: radius * 1000 // km -> metry
+                    }).addTo(circle);
+
+                    // Přizpůsobit pohled na kruh
+                    map.fitBounds(radiusCircle.getBounds());
+                }
+
+                // B) Vykreslit nalezené obce
+                if (places && places.length > 0) {
+                    places.forEach(place => {
+                        const isCity = place.type === 'city';
+                        const colorClass = isCity ? 'bg-indigo-600' : 'bg-blue-400';
+                        const size = isCity ? 12 : 8;
+
+                        const icon = L.divIcon({
+                            className: `${colorClass} border border-white rounded-full shadow-sm`,
+                            iconSize: [size, size]
+                        });
+
+                        L.marker([place.lat, place.lon], { icon })
+                            .bindPopup(`
+                                <div class="text-center">
+                                    <strong class="block text-sm">${place.name}</strong>
+                                    <span class="text-xs text-gray-500">${place.distance.toFixed(1)} km</span>
+                                </div>
+                            `)
+                            .addTo(markers);
+                    });
+                }
+
+            }, [center, radius, places]);
+
+            return <div ref={containerRef} className="map-container rounded-lg shadow-inner" />;
+        };
+
+        // --- HLAVNÍ APLIKACE ---
+        const App = () => {
+            // Stav aplikace
+            const [query, setQuery] = useState('');
+            const [radius, setRadius] = useState(10); // Výchozí 10 km
+            const [centerPlace, setCenterPlace] = useState(null);
+            const [foundPlaces, setFoundPlaces] = useState([]);
+            const [isLoading, setIsLoading] = useState(false);
+            const [errorMsg, setErrorMsg] = useState('');
+
+            // 1. Vyhledání centrální obce (Photon API)
+            const handleSearch = async (e) => {
+                e.preventDefault();
+                if (!query.trim()) return;
+
+                setIsLoading(true);
+                setErrorMsg('');
+                setFoundPlaces([]);
+                setCenterPlace(null);
+
+                try {
+                    // Hledáme v ČR (lang=cs)
+                    const res = await fetch(`${API_GEOCODE}?q=${encodeURIComponent(query)}&limit=1&lang=cs`);
+                    const data = await res.json();
+
+                    if (data.features && data.features.length > 0) {
+                        const feat = data.features[0];
+                        const newCenter = {
+                            name: feat.properties.name,
+                            lat: feat.geometry.coordinates[1],
+                            lon: feat.geometry.coordinates[0]
+                        };
+                        setCenterPlace(newCenter);
+                        // Automaticky spustit hledání okolí
+                        fetchNeighbors(newCenter, radius);
+                    } else {
+                        setErrorMsg("Obec nenalezena. Zkuste jiný název.");
+                        setIsLoading(false);
+                    }
+                } catch (err) {
+                    setErrorMsg("Chyba připojení k vyhledávání.");
+                    setIsLoading(false);
+                }
+            };
+
+            // 2. Vyhledání sousedů (Overpass API)
+            const fetchNeighbors = async (center, rad) => {
+                setIsLoading(true);
+
+                // Dotaz na OpenStreetMap: Hledej uzly (node) s tagem place=... v okruhu X metrů
+                const overpassQuery = `
+                    [out:json][timeout:25];
+                    (
+                      node["place"~"city|town|village"](around:${rad * 1000},${center.lat},${center.lon});
+                    );
+                    out body;
+                `;
+
+                try {
+                    const res = await fetch(API_OVERPASS, {
+                        method: 'POST',
+                        body: overpassQuery
+                    });
+                    
+                    if (!res.ok) throw new Error("Chyba serveru map");
+
+                    const data = await res.json();
+                    
+                    // Zpracování výsledků
+                    let results = data.elements.map(el => {
+                        const dist = calculateDistance(center.lat, center.lon, el.lat, el.lon);
+                        return {
+                            id: el.id,
+                            name: el.tags.name,
+                            type: el.tags.place, // city/town/village
+                            lat: el.lat,
+                            lon: el.lon,
+                            distance: dist
+                        };
+                    });
+
+                    // Filtrování (odstranit střed a místa bez názvu)
+                    results = results.filter(p => p.name && p.distance > 0.5);
+                    
+                    // Seřadit podle vzdálenosti
+                    results.sort((a, b) => a.distance - b.distance);
+
+                    setFoundPlaces(results);
+                    
+                    if (results.length === 0) setErrorMsg("V tomto okruhu žádné další obce nejsou.");
+
+                } catch (err) {
+                    console.error(err);
+                    setErrorMsg("Nepodařilo se načíst okolní obce. Zkuste to za chvíli.");
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            // Změna rádiusu - spustí nové hledání, pokud už máme střed
+            const handleRadiusChange = (newRadius) => {
+                setRadius(newRadius);
+            };
+            
+            // Pustit hledání až po uvolnění myši ze slideru
+            const handleRadiusCommit = () => {
+                if (centerPlace) {
+                    fetchNeighbors(centerPlace, radius);
+                }
+            };
+
+            // Kopírování do schránky
+            const copyList = () => {
+                const text = foundPlaces.map(p => `${p.name}\t${p.distance.toFixed(1)} km`).join('\n');
+                navigator.clipboard.writeText(text).then(() => alert("Seznam zkopírován!"));
+            };
+
+            return (
+                <div className="flex h-full flex-col md:flex-row">
+                    
+                    {/* LEVÝ PANEL (OVLÁDÁNÍ + SEZNAM) */}
+                    <div className="w-full md:w-96 bg-white shadow-xl z-10 flex flex-col h-1/2 md:h-full">
+                        
+                        {/* Hlavička */}
+                        <div className="p-4 bg-indigo-700 text-white shadow-md">
+                            <h1 className="text-xl font-bold flex items-center gap-2">
+                                <i data-lucide="map" className="w-6 h-6"></i> Mapa Obcí ČR
+                            </h1>
+                            <p className="text-indigo-200 text-xs mt-1">Nástroj pro plánování tras</p>
+                        </div>
+
+                        {/* Formulář */}
+                        <div className="p-4 border-b border-gray-200 bg-gray-50">
+                            <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+                                <input 
+                                    type="text" 
+                                    className="flex-1 p-2 border rounded shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    placeholder="Zadejte město (např. Kolín)"
+                                    value={query}
+                                    onChange={e => setQuery(e.target.value)}
+                                />
+                                <button 
+                                    type="submit" 
+                                    disabled={isLoading}
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded shadow transition-colors w-12 flex justify-center items-center"
+                                >
+                                    {isLoading ? <div className="loading-spinner"></div> : <i data-lucide="search" className="w-5 h-5"></i>}
+                                </button>
+                            </form>
+
+                            <div className="space-y-2">
+                                <div className="flex justify-between text-sm font-medium text-gray-700">
+                                    <span>Okruh hledání:</span>
+                                    <span className="text-indigo-600">{radius} km</span>
+                                </div>
+                                <input 
+                                    type="range" min="1" max="50" step="1"
+                                    value={radius}
+                                    onChange={e => handleRadiusChange(e.target.value)}
+                                    onMouseUp={handleRadiusCommit}
+                                    onTouchEnd={handleRadiusCommit}
+                                    className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                />
+                                <div className="flex justify-between text-xs text-gray-400">
+                                    <span>1 km</span>
+                                    <span>50 km</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Výsledky / Chyby */}
+                        <div className="flex-1 overflow-y-auto bg-white p-2 relative">
+                            
+                            {/* Načítání overlay */}
+                            {isLoading && (
+                                <div className="absolute inset-0 bg-white bg-opacity-90 flex flex-col items-center justify-center z-20">
+                                    <div className="loading-spinner-blue mb-3"></div>
+                                    <span className="text-gray-500 font-medium">Hledám obce...</span>
+                                </div>
+                            )}
+
+                            {/* Chybová hláška */}
+                            {errorMsg && (
+                                <div className="p-4 bg-red-50 text-red-600 rounded border border-red-200 text-center text-sm mb-2">
+                                    {errorMsg}
+                                </div>
+                            )}
+
+                            {/* Info panel */}
+                            {!isLoading && !errorMsg && foundPlaces.length === 0 && (
+                                <div className="text-center text-gray-400 mt-10">
+                                    <i data-lucide="navigation" className="w-12 h-12 mx-auto mb-2 opacity-30"></i>
+                                    <p>Zadejte název obce a stiskněte hledat.</p>
+                                </div>
+                            )}
+
+                            {/* Seznam obcí */}
+                            {foundPlaces.length > 0 && (
+                                <div className="space-y-1">
+                                    <div className="flex justify-between items-center px-2 py-1 mb-2 border-b border-gray-100">
+                                        <span className="text-xs font-bold text-gray-500">NALEZENO: {foundPlaces.length}</span>
+                                        <button onClick={copyList} className="text-xs text-indigo-600 hover:underline flex items-center gap-1">
+                                            <i data-lucide="copy" className="w-3 h-3"></i> Kopírovat
+                                        </button>
+                                    </div>
+                                    
+                                    {foundPlaces.map(place => (
+                                        <div key={place.id} className="flex justify-between items-center p-3 hover:bg-indigo-50 rounded border border-transparent hover:border-indigo-100 transition-colors group">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-2 h-2 rounded-full ${place.type === 'city' ? 'bg-indigo-600' : 'bg-blue-300'}`}></div>
+                                                <div>
+                                                    <div className="font-semibold text-gray-800 text-sm">{place.name}</div>
+                                                    <div className="text-xs text-gray-500">{place.distance.toFixed(1)} km</div>
+                                                </div>
+                                            </div>
+                                            <a 
+                                                href={`https://www.google.com/search?q=${encodeURIComponent(place.name + " obec")}`} 
+                                                target="_blank"
+                                                className="text-gray-300 hover:text-indigo-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                title="Hledat na Google"
+                                            >
+                                                <i data-lucide="external-link" className="w-4 h-4"></i>
+                                            </a>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* PRAVÝ PANEL (MAPA) */}
+                    <div className="flex-1 relative h-1/2 md:h-full bg-gray-200">
+                        <MapView center={centerPlace} radius={radius} places={foundPlaces} />
+                        
+                        {/* Legenda */}
+                        <div className="absolute bottom-5 right-5 bg-white p-3 rounded-lg shadow-lg z-[1000] text-xs opacity-90">
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="w-3 h-3 bg-red-600 rounded-full border border-white"></span>
+                                <span>Střed hledání</span>
+                            </div>
+                            <div className="flex items-center gap-2 mb-1">
+                                <span className="w-3 h-3 bg-indigo-600 rounded-full"></span>
+                                <span>Město</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="w-3 h-3 bg-blue-400 rounded-full"></span>
+                                <span>Obec / Vesnice</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+        
+        // Inicializace ikon
+        setTimeout(() => lucide.createIcons(), 500);
+    </script>
+</body>
+</html>
