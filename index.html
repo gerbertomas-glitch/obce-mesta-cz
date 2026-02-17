@@ -25,10 +25,10 @@
             max-height: 500px;
             overflow-y: auto;
         }
-        /* Animace načítání */
+        /* Animace načítání - Zelená */
         .loader {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #3b82f6;
+            border-top: 4px solid #65a30d; /* Změna na zelenou (lime-600/green-600) */
             border-radius: 50%;
             width: 24px;
             height: 24px;
@@ -45,34 +45,34 @@
         }
     </style>
 </head>
-<body class="bg-slate-100 text-slate-800 min-h-screen font-sans">
+<body class="bg-white text-slate-800 min-h-screen font-sans">
 
     <!-- Hlavní kontejner -->
     <div class="container mx-auto p-4 max-w-6xl">
         
         <!-- Hlavička -->
-        <header class="mb-6 text-center">
-            <h1 class="text-3xl font-bold text-blue-700 mb-2">
+        <header class="mb-8 text-center pt-4">
+            <h1 class="text-3xl font-bold text-green-700 mb-2 tracking-tight">
                 <i class="fa-solid fa-map-location-dot mr-2"></i>Města v okruhu
             </h1>
             <p class="text-slate-500">Začněte psát název obce a vyberte tu správnou ze seznamu.</p>
         </header>
 
         <!-- Ovládací panel -->
-        <div class="bg-white p-6 rounded-xl shadow-md mb-6">
+        <div class="bg-white p-6 rounded-xl shadow-lg border border-slate-100 mb-8">
             <div class="flex flex-col md:flex-row gap-4 items-end">
                 
                 <!-- Vstup: Město s našeptávačem -->
                 <div class="flex-1 w-full relative">
-                    <label for="cityInput" class="block text-sm font-medium text-slate-700 mb-1">Město / Obec</label>
+                    <label for="cityInput" class="block text-sm font-bold text-slate-700 mb-1">Město / Obec</label>
                     <div class="relative">
                         <input type="text" id="cityInput" placeholder="Začněte psát (např. Nová Ves)..." autocomplete="off"
-                               class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                               class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 focus:outline-none transition-colors"
                                oninput="handleInput(this.value)"
                                onkeydown="if(event.key === 'Enter') { closeSuggestions(); searchNearby(); }">
                         <!-- Spinner uvnitř inputu pro našeptávač -->
                         <div id="inputSpinner" class="absolute right-3 top-3 hidden">
-                             <i class="fa-solid fa-circle-notch fa-spin text-slate-400"></i>
+                             <i class="fa-solid fa-circle-notch fa-spin text-green-500"></i>
                         </div>
                     </div>
                     
@@ -84,37 +84,37 @@
 
                 <!-- Vstup: Rádius -->
                 <div class="w-full md:w-1/4">
-                    <label for="radiusInput" class="block text-sm font-medium text-slate-700 mb-1">Okruh (km)</label>
+                    <label for="radiusInput" class="block text-sm font-bold text-slate-700 mb-1">Okruh (km)</label>
                     <input type="number" id="radiusInput" value="10" min="1" max="100"
-                           class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                           class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 focus:outline-none transition-colors">
                 </div>
 
                 <!-- Tlačítko hledat -->
-                <button onclick="closeSuggestions(); searchNearby()" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition flex items-center justify-center gap-2 shadow-sm">
+                <button onclick="closeSuggestions(); searchNearby()" class="w-full md:w-auto bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-lg transition shadow-md hover:shadow-lg flex items-center justify-center gap-2">
                     <span>Hledat</span>
                     <div id="loadingSpinner" class="loader"></div>
                 </button>
             </div>
             <p id="statusMessage" class="text-red-500 text-sm mt-2 hidden"></p>
-            <p id="infoMessage" class="text-blue-500 text-xs mt-2 hidden"></p>
+            <p id="infoMessage" class="text-green-600 text-xs mt-2 hidden font-medium"></p>
         </div>
 
         <!-- Obsah: Mapa a Seznam -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             <!-- Mapa (zabírá 2/3 na velkých displejích) -->
-            <div class="lg:col-span-2 bg-white p-2 rounded-xl shadow-md border border-slate-200">
+            <div class="lg:col-span-2 bg-white p-2 rounded-xl shadow-lg border border-slate-100">
                 <div id="map" class="rounded-lg"></div>
             </div>
 
             <!-- Seznam výsledků (zabírá 1/3) -->
-            <div class="bg-white rounded-xl shadow-md border border-slate-200 flex flex-col h-[516px]">
-                <div class="p-4 border-b border-slate-100 bg-slate-50 rounded-t-xl">
-                    <h2 class="font-semibold text-lg text-slate-700">Nalezená místa <span id="resultCount" class="text-sm font-normal text-slate-500 ml-2">(0)</span></h2>
+            <div class="bg-white rounded-xl shadow-lg border border-slate-100 flex flex-col h-[516px]">
+                <div class="p-4 border-b border-slate-100 bg-green-50 rounded-t-xl">
+                    <h2 class="font-bold text-lg text-green-800">Nalezená místa <span id="resultCount" class="text-sm font-normal text-green-600 ml-2">(0)</span></h2>
                 </div>
                 <div id="resultsList" class="list-scroll p-2 flex-1">
                     <div class="text-center text-slate-400 mt-10">
-                        <i class="fa-regular fa-compass text-4xl mb-3"></i>
+                        <i class="fa-regular fa-compass text-4xl mb-3 text-slate-300"></i>
                         <p>Zatím žádné výsledky.</p>
                     </div>
                 </div>
@@ -138,6 +138,7 @@
         let markersGroup = L.layerGroup().addTo(map);
         let searchCircle = null;
 
+        // Červená pro střed zůstává (aby se odlišila)
         const centerIcon = L.icon({
             iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
@@ -147,8 +148,9 @@
             shadowSize: [41, 41]
         });
 
+        // ZELENÁ pro okolní města (změna z modré)
         const neighborIcon = L.icon({
-            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
             shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
             iconSize: [25, 41],
             iconAnchor: [12, 41],
@@ -159,7 +161,6 @@
         // --- 2. Našeptávač (Autocomplete) Logic ---
         let debounceTimer;
         
-        // Funkce volaná při psaní (čeká 400ms než pošle dotaz)
         function handleInput(value) {
             clearTimeout(debounceTimer);
             const suggestionsBox = document.getElementById('suggestions');
@@ -183,8 +184,6 @@
             const inputSpinner = document.getElementById('inputSpinner');
 
             try {
-                // Hledáme v Nominatim API, omezujeme na ČR (countrycodes=cz) pro přesnější výsledky
-                // Pokud chcete hledat i v zahraničí, odstraňte "&countrycodes=cz"
                 const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5&countrycodes=cz`;
                 
                 const response = await fetch(url);
@@ -197,10 +196,8 @@
                     
                     data.forEach(item => {
                         const div = document.createElement('div');
-                        div.className = "p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0 transition text-sm";
+                        div.className = "p-3 hover:bg-green-50 cursor-pointer border-b border-slate-100 last:border-0 transition text-sm";
                         
-                        // Zformátujeme název (aby byl hezky čitelný)
-                        // display_name bývá dlouhý, zkusíme vzít název a okres/kraj
                         const displayName = item.display_name;
                         const name = item.name;
                         
@@ -209,7 +206,6 @@
                             <div class="text-xs text-slate-500 truncate">${displayName}</div>
                         `;
                         
-                        // Po kliknutí vybereme město a rovnou hledáme
                         div.onclick = () => selectCity(item);
                         
                         suggestionsBox.appendChild(div);
@@ -226,12 +222,8 @@
 
         function selectCity(item) {
             const input = document.getElementById('cityInput');
-            // Nastavíme do inputu jen krátký název (např. "Loučeň")
             input.value = item.name;
             closeSuggestions();
-            
-            // Rovnou spustíme hledání s přesnými souřadnicemi z našeptávače
-            // Tím se vyhneme duplicitnímu hledání a nejistotě
             searchNearby(item.lat, item.lon, item.name);
         }
 
@@ -239,7 +231,6 @@
             document.getElementById('suggestions').classList.add('hidden');
         }
 
-        // Zavření našeptávače při kliknutí mimo
         document.addEventListener('click', function(e) {
             const container = document.querySelector('.relative');
             const suggestions = document.getElementById('suggestions');
@@ -250,7 +241,6 @@
 
 
         // --- 3. Hlavní Funkce Hledání ---
-        // Nyní přijímá volitelné argumenty lat/lon/name, pokud jdeme z našeptávače
         async function searchNearby(customLat = null, customLon = null, customName = null) {
             const city = document.getElementById('cityInput').value;
             const radiusKm = parseFloat(document.getElementById('radiusInput').value);
@@ -281,13 +271,11 @@
             try {
                 let centerLat, centerLon, centerName;
 
-                // LOGIKA: Pokud máme souřadnice z našeptávače, použijeme je. Jinak hledáme textově.
                 if (customLat && customLon) {
                     centerLat = parseFloat(customLat);
                     centerLon = parseFloat(customLon);
                     centerName = customName || city;
                 } else {
-                    // Krok A: Geocoding (Nominatim API) - fallback pokud uživatel nepoužil našeptávač a dal Enter
                     const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}&limit=1&addressdetails=1&accept-language=cs`;
                     
                     const geoResponse = await fetch(geocodeUrl, { headers: { 'Accept': 'application/json' } });
@@ -308,9 +296,10 @@
                  .bindPopup(`<b>${centerName}</b><br>Střed hledání`)
                  .addTo(markersGroup);
 
+                // Změna barvy kruhu na ZELENOU (#16a34a - corresponds to tailwind green-600)
                 searchCircle = L.circle([centerLat, centerLon], {
-                    color: '#3b82f6',
-                    fillColor: '#3b82f6',
+                    color: '#16a34a',
+                    fillColor: '#16a34a',
                     fillOpacity: 0.1,
                     radius: radiusKm * 1000
                 }).addTo(map);
@@ -329,7 +318,6 @@
                     out body;
                 `;
 
-                // Seznam serverů k vyzkoušení (Load balancing)
                 const servers = [
                     "https://overpass-api.de/api/interpreter",
                     "https://overpass.kumi.systems/api/interpreter", 
@@ -383,14 +371,15 @@
                 } else {
                     places.forEach((place, index) => {
                         const item = document.createElement('div');
-                        item.className = "flex justify-between items-center p-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 transition rounded-lg mx-1";
+                        // Hover efekt změněn na zelenou
+                        item.className = "flex justify-between items-center p-3 hover:bg-green-50 cursor-pointer border-b border-slate-100 transition rounded-lg mx-1";
                         item.onclick = () => {
                             map.flyTo([place.lat, place.lon], 13);
                         };
                         item.innerHTML = `
                             <div>
                                 <div class="font-medium text-slate-800 flex items-center gap-2">
-                                    <span class="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full">${index + 1}</span>
+                                    <span class="bg-green-100 text-green-800 text-xs px-2 py-0.5 rounded-full">${index + 1}</span>
                                     ${place.name}
                                 </div>
                                 <div class="text-xs text-slate-500 capitalize">${place.type}</div>
@@ -418,7 +407,7 @@
 
         async function fetchOverpass(baseUrl, query) {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+            const timeoutId = setTimeout(() => controller.abort(), 15000); 
 
             try {
                 const response = await fetch(`${baseUrl}?data=${encodeURIComponent(query)}`, {
